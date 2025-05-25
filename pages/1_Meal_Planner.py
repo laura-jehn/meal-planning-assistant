@@ -1,26 +1,17 @@
 import streamlit as st
 from datetime import date, timedelta
+from dotenv import load_dotenv
+import os
 
-from utils import load_all_state, save_all_state
+from supabase import create_client, Client
+
+load_dotenv()
+url: str = os.getenv("SUPABASE_URL")
+key: str = os.getenv("SUPABASE_KEY")
+supabase: Client = create_client(url, key)
 
 st.set_page_config(page_title="Meal Planner", layout="centered")
 st.title("📅 Meal Planner")
-
-if "initialized" not in st.session_state:
-    recipes, meal_plan = load_all_state()
-    st.session_state.recipes = recipes
-    st.session_state.meal_plan = meal_plan
-    st.session_state.initialized = True
-
-recipes = st.session_state.recipes
-meal_plan = st.session_state.meal_plan
-
-if not recipes:
-    st.warning("No recipes found in the library. Please add recipes first!")
-    st.stop()
-
-# Prepare recipe names list with an empty option
-recipe_names = [""] + [r["name"] for r in recipes]
 
 def get_start_of_week(d: date):
     return d - timedelta(days=d.weekday())
@@ -32,22 +23,70 @@ week_start_str = week_start.strftime("%Y-%m-%d")
 
 st.markdown(f"### Plan 5 recipes for the week starting **{week_start_str}**")
 
-existing_plan = st.session_state.meal_plan.get(week_start_str, [""] * 5)
+def fetch_recipes():
+    response = supabase.table("recipes").select("*").execute()
+    if not response:
+        st.error(f"Error fetching recipes.")
+        return []
+    return response.data
 
+
+def fetch_meal_plan():
+    response = supabase.table("meal_plans").select("*, recipes(*)").eq("week", week_start_str).execute()
+    if not response:
+        st.error(f"Error fetching meal plans.")
+        return []
+    return response.data
+
+recipes = fetch_recipes()
+meal_plan = fetch_meal_plan()
+
+if not recipes:
+    st.warning("No recipes found in the library. Please add recipes first!")
+    st.stop()
+
+# Prepare recipe names list with an empty option
+recipe_names = [""] + [r["name"] for r in recipes]
+
+# Filter meal plans for the selected week
+current_week_entries = {entry.get("day"): entry for entry in meal_plan}
 days = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday"]
 
 with st.form("meal_planner_form"):
-    selected_meals = []
     for i, day in enumerate(days):
-        meal = st.selectbox(f"{day}'s meal", options=recipe_names, index=recipe_names.index(existing_plan[i]) if existing_plan[i] in recipe_names else 0, key=f"meal_{week_start_str}_{i}")
-        selected_meals.append(meal)
+        if i not in current_week_entries:
+            recipe_name = ""
+        else:
+            recipe_id = current_week_entries[i].get("recipe")
+            recipe_name = current_week_entries[i].get("recipes").get("name")
+
+        meal = st.selectbox(f"{day}'s meal", options=recipe_names, index=recipe_names.index(recipe_name) if recipe_name in recipe_names else 0, key=f"meal_{week_start_str}_{i}")
 
     submitted = st.form_submit_button("Save Meal Plan")
 
     if submitted:
-        st.session_state.meal_plan[week_start_str] = selected_meals
+        for i in range(5):
+            meal = st.session_state.get(f"meal_{week_start_str}_{i}")
+            if meal:
+                # Check if the meal already exists in the current week entries
+                if i in current_week_entries:
+                    # Update the meal plan entry if the recipe has changed
+                    if current_week_entries[i]["recipes"]["name"] != meal:
+                        data = {"recipe": next((r["id"] for r in recipes if r["name"] == meal), None)}
+                        response = supabase.table("meal_plans").update(
+                            data
+                        ).eq("id", current_week_entries[i]["id"]).execute()
+                else:
+                    # Insert a new meal plan entry if it doesn't exist
+                    supabase.table("meal_plans").insert(
+                        {"week": week_start_str, "day": i, "recipe": next((r["id"] for r in recipes if r["name"] == meal), None)}
+                    ).execute()
+            else:
+                # If the meal is not set, delete the entry if it exists
+                if i in current_week_entries:
+                    supabase.table("meal_plans").delete().eq("id", current_week_entries[i]["id"]).execute()
+
         st.success(f"Meal plan for week {week_start_str} saved!")
-        save_all_state(st.session_state.recipes, st.session_state.meal_plan)
         st.rerun()
 
 st.divider()
@@ -55,26 +94,18 @@ st.divider()
 # Display current plan in a table
 st.markdown(f"### Current meal plan for week {week_start_str}")
 
-# Initialize session state
-if "feedback" not in st.session_state:
-    st.session_state.feedback = {
-        day: {"star": 0, "comment": ""} for day in days
-    }
-
 import pandas as pd
 df = pd.DataFrame({
     "Day": days,
-    "Recipe": existing_plan,
-    "Rate": [st.session_state.feedback[day]["star"] for day in days],
-    "Comment": [st.session_state.feedback[day]["comment"] for day in days]
+    "Recipe": [current_week_entries[i]["recipes"]["name"] if i in current_week_entries else "" for i in range(5)],
+    "Rate": [current_week_entries[i]["rating"] if i in current_week_entries else None for i in range(5)],
+    "Comment": [current_week_entries[i]["comment"] if i in current_week_entries else None for i in range(5)],
 })
 
-#TODO: save feedback to recipe as well as meal plan!
-
+# Allow editing of ratings and comments
 edited_df = st.data_editor(
     df,
     column_config={
-        "Day": "",
         "Recipe": st.column_config.SelectboxColumn(
             "Recipe",
             options=recipe_names,
@@ -94,16 +125,39 @@ edited_df = st.data_editor(
     hide_index=True,
 )
 
+if st.button("Save feedback"):
+    for i, day in enumerate(days):
+        if i in current_week_entries:
+            entry_id = current_week_entries[i]["id"]
+            updated_rating = edited_df.at[i, "Rate"]
+            updated_comment = edited_df.at[i, "Comment"]
+
+            # Check if rating or comment has changed
+            if (
+                updated_rating != current_week_entries[i].get("rating") or
+                updated_comment != current_week_entries[i].get("comment")
+            ):
+                supabase.table("meal_plans").update({
+                    "rating": int(updated_rating) or None,
+                    "comment": updated_comment or None
+                }).eq("id", entry_id).execute()
+
+    st.success("Feedback saved successfully!")
+    st.rerun()
+
+st.markdown("#### Recipe Details")
+
 # Unter der Tabelle: Ausklappbare Details pro Tag
-for day, recipe in zip(days, existing_plan):
-    recipe = next((r for r in recipes if r["name"] == recipe), None)
-    if recipe is None:
-        st.markdown(f"#### {day} - No recipe planned")
-        continue
-    with st.expander(f"{day} - {recipe['name']} details"):
-        st.write(f"**Protein:** {recipe.get('protein', 'N/A')}")
-        st.write(f"**Sauce:** {recipe.get('sauce', 'N/A')}")
-        st.write(f"**Vegetables:** {', '.join(recipe.get('veggies', []))}")
-        st.write(f"**Toppings:** {', '.join(recipe.get('toppings', []))}")
-        st.write(f"**Notes:** {recipe.get('notes', '')}")
-        st.write(f"**Instructions:** {recipe.get('instructions', '')}")
+for i, entry in current_week_entries.items():
+    recipe_name = entry["recipes"]["name"]
+    with st.expander(f"**{days[i]} - {recipe_name}**"):
+        st.write("")
+        st.write(f"**Ingredients:** {', '.join(entry['recipes']['ingredients'])}")
+        st.info(f"**Instructions:** {entry['recipes']['instructions']}")
+    
+st.divider()
+
+st.markdown("#### Approve Meal Plan for the Week")
+
+sentiment_mapping = [":material/thumb_down:", ":material/thumb_up:"]
+selected = st.feedback("thumbs")
