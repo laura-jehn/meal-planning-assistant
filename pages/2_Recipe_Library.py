@@ -11,7 +11,10 @@ supabase: Client = create_client(url, key)
 st.set_page_config(page_title="Recipe Library", layout="centered")
 
 st.title("📚 Recipe Library")
-st.markdown("Create and store abstract meal recipes.")
+
+if st.session_state.user is None:
+    st.warning("Please log in to access the recipe library.")
+    st.stop()
 
 def fetch_recipes():
     response = supabase.table("recipes").select("*").execute()

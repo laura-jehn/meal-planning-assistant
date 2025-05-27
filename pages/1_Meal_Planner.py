@@ -13,6 +13,10 @@ supabase: Client = create_client(url, key)
 st.set_page_config(page_title="Meal Planner", layout="centered")
 st.title("📅 Meal Planner")
 
+if st.session_state.user is None:
+    st.warning("Please log in to access the meal planner.")
+    st.stop()
+
 def get_start_of_week(d: date):
     return d - timedelta(days=d.weekday())
 
@@ -24,7 +28,7 @@ week_start_str = week_start.strftime("%Y-%m-%d")
 st.markdown(f"### Plan 5 recipes for the week starting **{week_start_str}**")
 
 def fetch_recipes():
-    response = supabase.table("recipes").select("*").execute()
+    response = supabase.table("recipes").select("*").eq("author", st.session_state.user.id).execute()
     if not response:
         st.error(f"Error fetching recipes.")
         return []
@@ -32,7 +36,7 @@ def fetch_recipes():
 
 
 def fetch_meal_plan():
-    response = supabase.table("meal_plans").select("*, recipes(*)").eq("week", week_start_str).execute()
+    response = supabase.table("meal_plans").select("*, recipes(*)").eq("user", st.session_state.user.id).eq("week", week_start_str).execute()
     if not response:
         st.error(f"Error fetching meal plans.")
         return []

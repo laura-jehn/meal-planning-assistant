@@ -17,6 +17,10 @@ groq_client = Groq(
 st.set_page_config(page_title="Shopping List", layout="centered")
 st.title("🛒 Shopping List Generator")
 
+if st.session_state.user is None:
+    st.warning("Please log in to access the shopping list generator.")
+    st.stop()
+
 # Calculate the date of the next Monday
 today = date.today()
 days_until_monday = (7 - today.weekday()) % 7
@@ -63,5 +67,6 @@ if st.button("Generate Shopping List"):
             temperature=0.2,
         )
         result = response.choices[0].message.content
+
         st.markdown("### 🧾 Shopping List")
         st.markdown(result)
