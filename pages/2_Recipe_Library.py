@@ -24,10 +24,8 @@ if refresh_token and access_token and "user" not in st.session_state:
     except Exception as e:
         print(e)
         new_session = supabase.auth.refresh_session(refresh_token).session
-        access_token = new_session.access_token
-        refresh_token = new_session.refresh_token
-        controller.set("access_token", access_token)
-        controller.set("refresh_token", refresh_token)
+        controller.set("access_token", new_session.access_token)
+        controller.set("refresh_token", new_session.refresh_token)
     if user:
         st.session_state.user = user.user
 
@@ -169,6 +167,7 @@ if edit_index is not None:
         cancel = col2.form_submit_button("❌ Cancel")
 
         print(recipe)
+        print(instructions)
 
         if save:
             updated = {
@@ -178,6 +177,8 @@ if edit_index is not None:
             }
 
             response = supabase.table("recipes").update(updated).eq("id", recipe["id"]).execute()
+
+            print(response)
             if not response:
                 st.error(f"Error updating recipe: {response.error.message}")
             st.session_state.edit_index = None
