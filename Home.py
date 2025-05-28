@@ -97,16 +97,3 @@ if "user" in st.session_state:
 else:
     show_login()
     st.stop()
-
-
-from recipe_scrapers import scrape_me
-
-# Example: Replace this with any supported recipe URL
-url = "https://biancazapatka.com/de/veganes-mac-and-cheese-vegane-kaesesosse/"
-scraper = scrape_me(url)
-
-# Extract the data
-st.info(f"Title: {scraper.title()}")
-st.info(f"Ingredients: {scraper.ingredients()}")
-st.info(f"Instructions: {scraper.instructions()}")
-st.info(f"Image URL: {scraper.image()}")

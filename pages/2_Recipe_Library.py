@@ -3,6 +3,7 @@ from streamlit_cookies_controller import CookieController
 import time
 from datetime import datetime, timedelta
 from supabase import create_client
+from recipe_scrapers import scrape_me
 
 st.set_page_config(page_title="Recipe Library", layout="centered")
 st.title("📚 Recipe Library")
@@ -46,12 +47,53 @@ if "user" not in st.session_state:
 
 ################################################# 
 
+# Form for URL input
+with st.form("recipe_form"):
+    url = st.text_input("Paste the recipe URL here:")
+    submit = st.form_submit_button("Add recipe from URL")
+
+if submit:
+    try:
+        scraper = scrape_me(url)
+
+        # Extract fields
+        name = scraper.title()
+        ingredients = scraper.ingredients()
+        instructions = scraper.instructions()
+
+        new_recipe = {
+            "name": name,
+            "ingredients": ingredients,
+            "instructions": instructions,
+            "author": st.session_state.user.id
+        }
+
+        response = supabase.table("recipes").insert(new_recipe).execute()
+        st.success(f"Recipe '{name}' added!")
+        # Show result
+        st.markdown("**Ingredients:**")
+        st.write(ingredients)
+        st.markdown("**Instructions:**")
+        st.write(instructions)
+        time.sleep(10)
+        st.rerun()
+
+    except Exception as e:
+        st.error(f"Failed to scrape recipe: {e}")
+
 def fetch_recipes():
-    response = supabase.table("recipes").select("*").execute()
-    if not response:
-        st.error(f"Error fetching recipes: {response.error.message}")
+    def merge_recipes(user_recipes, public_recipes):
+        merged = {recipe["id"]: recipe for recipe in user_recipes}
+        for recipe in public_recipes:
+            if recipe["id"] not in merged:
+                merged[recipe["id"]] = recipe
+        return list(merged.values())
+    user_recipes = supabase.table("recipes").select("*").eq("author", st.session_state.user.id).execute()
+    public_recipes = supabase.table("recipes").select("*").eq("public", True).execute()
+    if not user_recipes:
+        st.error(f"Error fetching recipes: {user_recipes.error.message}")
         return []
-    return response.data
+    return merge_recipes(user_recipes.data, public_recipes.data)
 
 # Fetch recipes and initialize session state
 recipes = fetch_recipes()
@@ -101,6 +143,7 @@ with st.form("create_recipe"):
                 "name": st.session_state.name.strip(),
                 "ingredients": ingredients,
                 "instructions": st.session_state.instructions or None,
+                "author": st.session_state.user.id
             }
 
             response = supabase.table("recipes").insert(new_recipe).execute()
