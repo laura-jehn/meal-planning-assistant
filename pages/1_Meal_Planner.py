@@ -22,12 +22,10 @@ if refresh_token and access_token and "user" not in st.session_state:
     try:
         user = supabase.auth.get_user(access_token)
     except Exception as e:
-        print(e)
         new_session = supabase.auth.refresh_session(refresh_token).session
-        access_token = new_session.access_token
-        refresh_token = new_session.refresh_token
-        controller.set("access_token", access_token)
-        controller.set("refresh_token", refresh_token)
+        controller.set("access_token", new_session.access_token)
+        controller.set("refresh_token", new_session.refresh_token)
+        time.sleep(1)
     if user:
         st.session_state.user = user.user
 
