@@ -15,10 +15,18 @@ def init_connection():
 supabase = init_connection()
 
 controller = CookieController(key='cookies')
-cookie_name = "supabase_token"
-token = controller.get(cookie_name)
-if token and "user" not in st.session_state:
-    user = supabase.auth.get_user(token)
+access_token = controller.get("access_token")
+refresh_token = controller.get("refresh_token")
+if refresh_token and access_token and "user" not in st.session_state:
+    try:
+        user = supabase.auth.get_user(access_token)
+    except Exception as e:
+        print(e)
+        new_session = supabase.auth.refresh_session(refresh_token).session
+        access_token = new_session.access_token
+        refresh_token = new_session.refresh_token
+        controller.set("access_token", access_token)
+        controller.set("refresh_token", refresh_token)
     if user:
         st.session_state.user = user.user
 
@@ -54,8 +62,10 @@ def show_login():
             try:
                 result = supabase.auth.sign_in_with_password({"email": email, "password": password})
                 st.session_state.user = result.user
-                token = result.session.access_token
-                controller.set(cookie_name, token)
+                access_token = result.session.access_token
+                refresh_token = result.session.refresh_token
+                controller.set("access_token", access_token)
+                controller.set("refresh_token", refresh_token)
                 time.sleep(1)  # wait for cookie to set
                 st.success("Logged in successfully!")
                 st.rerun()
@@ -80,9 +90,23 @@ if "user" in st.session_state:
     if st.sidebar.button("Logout"):
         st.session_state.clear()
         expires_at = datetime.now() + timedelta(days=-7)
-        controller.set(cookie_name, "", expires=expires_at)
+        controller.set("access_token", "", expires=expires_at)
+        controller.set("refresh_token", "", expires=expires_at)
         time.sleep(1)
         st.rerun()
 else:
     show_login()
     st.stop()
+
+
+from recipe_scrapers import scrape_me
+
+# Example: Replace this with any supported recipe URL
+url = "https://biancazapatka.com/de/veganes-mac-and-cheese-vegane-kaesesosse/"
+scraper = scrape_me(url)
+
+# Extract the data
+st.info(f"Title: {scraper.title()}")
+st.info(f"Ingredients: {scraper.ingredients()}")
+st.info(f"Instructions: {scraper.instructions()}")
+st.info(f"Image URL: {scraper.image()}")

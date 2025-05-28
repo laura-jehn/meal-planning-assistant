@@ -5,3 +5,4 @@ supabase
 Authlib
 streamlit-cookies-controller
 groq
+recipe-scrapers
