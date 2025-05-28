@@ -1,9 +1,12 @@
 import streamlit as st
-import os
-from dotenv import load_dotenv
-from supabase import create_client, Client
+from supabase import create_client
+import time
+from datetime import datetime, timedelta
+from streamlit_cookies_controller import CookieController
 
-@st.cache_resource
+st.set_page_config(page_title="Meal Prep Planner", layout="centered", initial_sidebar_state="expanded")
+st.title("🥗 Meal Planning Assistant")
+
 def init_connection():
     url = st.secrets["SUPABASE_URL"]
     key = st.secrets["SUPABASE_KEY"]
@@ -11,10 +14,15 @@ def init_connection():
 
 supabase = init_connection()
 
+controller = CookieController(key='cookies')
+cookie_name = "supabase_token"
+token = controller.get(cookie_name)
+if token and "user" not in st.session_state:
+    user = supabase.auth.get_user(token)
+    if user:
+        st.session_state.user = user.user
 
-st.set_page_config(page_title="Meal Prep Planner", layout="centered", initial_sidebar_state="expanded")
-
-st.title("🥗 Meal Planning Assistant")
+#################################################
 
 st.markdown(f"""
 Are you also fed up with constantly figuring out what to eat every day, only to realize your partner isn't in the mood for it, or worse — you’re missing half the ingredients?
@@ -46,9 +54,13 @@ def show_login():
             try:
                 result = supabase.auth.sign_in_with_password({"email": email, "password": password})
                 st.session_state.user = result.user
+                token = result.session.access_token
+                controller.set(cookie_name, token)
+                time.sleep(1)  # wait for cookie to set
                 st.success("Logged in successfully!")
                 st.rerun()
             except Exception as e:
+                st.error(e)
                 st.error("Login failed. Check your email/password.")
 
     with tab2:
@@ -62,28 +74,15 @@ def show_login():
             except Exception as e:
                 st.error("Signup failed. Maybe account already exists?")
 
-if st.session_state.user is None:
-    show_login()
-    st.stop()  # Don't continue if not logged in
-else:
+
+if "user" in st.session_state:
     st.sidebar.write(f"👋 Logged in as: {st.session_state.user.email}")
     if st.sidebar.button("Logout"):
-        st.session_state.user = None
+        st.session_state.clear()
+        expires_at = datetime.now() + timedelta(days=-7)
+        controller.set(cookie_name, "", expires=expires_at)
+        time.sleep(1)
         st.rerun()
-
-# def validate_user(username, password):
-#     try:
-#         result = supabase.auth.sign_in_with_password({
-#             "email": username,
-#             "password": password
-#         })
-#         user = result.user
-#         return {"email": user.email, "id": user.id}  # required format
-#     except Exception as e:
-#         st.error("❌ Login failed: check email or password.")
-#         return None
-
-# # --- Show the login widget ---
-# if not st.user.is_logged_in:
-#      if st.button("Login"):
-#          user = ""
+else:
+    show_login()
+    st.stop()

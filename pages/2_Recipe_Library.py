@@ -1,20 +1,41 @@
 import streamlit as st
-import os
-from dotenv import load_dotenv
-from supabase import create_client, Client
-
-load_dotenv()
-url: str = os.getenv("SUPABASE_URL")
-key: str = os.getenv("SUPABASE_KEY")
-supabase: Client = create_client(url, key)
+from streamlit_cookies_controller import CookieController
+import time
+from datetime import datetime, timedelta
+from supabase import create_client
 
 st.set_page_config(page_title="Recipe Library", layout="centered")
-
 st.title("📚 Recipe Library")
 
-if st.session_state.user is None:
+def init_connection():
+    url = st.secrets["SUPABASE_URL"]
+    key = st.secrets["SUPABASE_KEY"]
+    return create_client(url, key)
+
+supabase = init_connection()
+
+controller = CookieController(key='cookies')
+cookie_name = "supabase_token"
+token = controller.get(cookie_name)
+if token and "user" not in st.session_state:
+    user = supabase.auth.get_user(token)
+    if user:
+        st.session_state.user = user.user
+
+if "user" in st.session_state:
+    st.sidebar.write(f"👋 Logged in as: {st.session_state.user.email}")
+    if st.sidebar.button("Logout"):
+        st.session_state.clear()
+        expires_at = datetime.now() + timedelta(days=-7)
+        controller.set(cookie_name, "", expires=expires_at)
+        time.sleep(1)
+        st.rerun()
+
+if "user" not in st.session_state:
     st.warning("Please log in to access the recipe library.")
     st.stop()
+
+################################################# 
 
 def fetch_recipes():
     response = supabase.table("recipes").select("*").execute()

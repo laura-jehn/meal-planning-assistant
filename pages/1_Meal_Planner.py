@@ -1,21 +1,42 @@
 import streamlit as st
-from datetime import date, timedelta
-from dotenv import load_dotenv
-import os
-
-from supabase import create_client, Client
-
-load_dotenv()
-url: str = os.getenv("SUPABASE_URL")
-key: str = os.getenv("SUPABASE_KEY")
-supabase: Client = create_client(url, key)
+from datetime import datetime, date, timedelta
+import pandas as pd
+from streamlit_cookies_controller import CookieController
+import time
+from supabase import create_client
 
 st.set_page_config(page_title="Meal Planner", layout="centered")
 st.title("📅 Meal Planner")
 
-if st.session_state.user is None:
+def init_connection():
+    url = st.secrets["SUPABASE_URL"]
+    key = st.secrets["SUPABASE_KEY"]
+    return create_client(url, key)
+
+supabase = init_connection()
+
+controller = CookieController(key='cookies')
+cookie_name = "supabase_token"
+token = controller.get(cookie_name)
+if token and "user" not in st.session_state:
+    user = supabase.auth.get_user(token)
+    if user:
+        st.session_state.user = user.user
+
+if "user" in st.session_state:
+    st.sidebar.write(f"👋 Logged in as: {st.session_state.user.email}")
+    if st.sidebar.button("Logout"):
+        st.session_state.clear()
+        expires_at = datetime.now() + timedelta(days=-7)
+        controller.set(cookie_name, "", expires=expires_at)
+        time.sleep(1)
+        st.rerun()
+
+if "user" not in st.session_state:
     st.warning("Please log in to access the meal planner.")
     st.stop()
+
+################################################# 
 
 def get_start_of_week(d: date):
     return d - timedelta(days=d.weekday())
@@ -83,7 +104,7 @@ with st.form("meal_planner_form"):
                 else:
                     # Insert a new meal plan entry if it doesn't exist
                     supabase.table("meal_plans").insert(
-                        {"week": week_start_str, "day": i, "recipe": next((r["id"] for r in recipes if r["name"] == meal), None)}
+                        {"week": week_start_str, "day": i, "recipe": next((r["id"] for r in recipes if r["name"] == meal), None), "user": st.session_state.user.id}
                     ).execute()
             else:
                 # If the meal is not set, delete the entry if it exists
@@ -98,7 +119,6 @@ st.divider()
 # Display current plan in a table
 st.markdown(f"### Current meal plan for week {week_start_str}")
 
-import pandas as pd
 df = pd.DataFrame({
     "Day": days,
     "Recipe": [current_week_entries[i]["recipes"]["name"] if i in current_week_entries else "" for i in range(5)],

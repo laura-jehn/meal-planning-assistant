@@ -1,21 +1,47 @@
 import streamlit as st
-import os
 from groq import Groq
-from dotenv import load_dotenv
-from datetime import date, timedelta
+from datetime import date, timedelta, datetime
+from streamlit_cookies_controller import CookieController
+import time
+from supabase import create_client
 
-from supabase import create_client, Client
-
-load_dotenv()
-url: str = os.getenv("SUPABASE_URL")
-key: str = os.getenv("SUPABASE_KEY")
-supabase: Client = create_client(url, key)
-groq_client = Groq(
-  api_key=os.getenv("GROQ_API_KEY")
-)
+GROQ_API_KEY="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"
 
 st.set_page_config(page_title="Shopping List", layout="centered")
 st.title("🛒 Shopping List Generator")
+
+def init_connection():
+    url = st.secrets["SUPABASE_URL"]
+    key = st.secrets["SUPABASE_KEY"]
+    return create_client(url, key)
+
+supabase = init_connection()
+groq_client = Groq(
+  api_key=GROQ_API_KEY #st.secrets["GROQ_API_KEY"]
+)
+
+controller = CookieController(key='cookies')
+cookie_name = "supabase_token"
+token = controller.get(cookie_name)
+if token and "user" not in st.session_state:
+    user = supabase.auth.get_user(token)
+    if user:
+        st.session_state.user = user.user
+
+if "user" in st.session_state:
+    st.sidebar.write(f"👋 Logged in as: {st.session_state.user.email}")
+    if st.sidebar.button("Logout"):
+        st.session_state.clear()
+        expires_at = datetime.now() + timedelta(days=-7)
+        controller.set(cookie_name, "", expires=expires_at)
+        time.sleep(1)
+        st.rerun()
+
+if "user" not in st.session_state:
+    st.warning("Please log in to access the recipe library.")
+    st.stop()
+
+################################################# 
 
 if st.session_state.user is None:
     st.warning("Please log in to access the shopping list generator.")
@@ -27,7 +53,7 @@ days_until_monday = (7 - today.weekday()) % 7
 next_monday = today + timedelta(days=days_until_monday)
 
 def fetch_meal_plan():
-    response = supabase.table("meal_plans").select("*, recipes(*)").eq("week", next_monday).execute()
+    response = supabase.table("meal_plans").select("*, recipes(*)").eq("user", st.session_state.user.id).eq("week", next_monday).execute()
     if not response:
         st.error(f"Error fetching meal plans.")
         return []
