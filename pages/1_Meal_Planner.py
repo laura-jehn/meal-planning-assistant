@@ -57,13 +57,26 @@ week_start_str = week_start.strftime("%Y-%m-%d")
 
 st.markdown(f"### Plan 5 recipes for the week starting **{week_start_str}**")
 
-def fetch_recipes():
-    response = supabase.table("recipes").select("*").eq("author", st.session_state.user.id).execute()
-    if not response:
-        st.error(f"Error fetching recipes.")
-        return []
-    return response.data
+# def fetch_recipes():
+#     response = supabase.table("recipes").select("*").eq("author", st.session_state.user.id).execute()
+#     if not response:
+#         st.error(f"Error fetching recipes.")
+#         return []
+#     return response.data
 
+def fetch_recipes():
+    def merge_recipes(user_recipes, public_recipes):
+        merged = {recipe["id"]: recipe for recipe in user_recipes}
+        for recipe in public_recipes:
+            if recipe["id"] not in merged:
+                merged[recipe["id"]] = recipe
+        return list(merged.values())
+    user_recipes = supabase.table("recipes").select("*").eq("author", st.session_state.user.id).execute()
+    public_recipes = supabase.table("recipes").select("*").eq("public", True).execute()
+    if not user_recipes:
+        st.error(f"Error fetching recipes: {user_recipes.error.message}")
+        return []
+    return merge_recipes(user_recipes.data, public_recipes.data)
 
 def fetch_meal_plan():
     response = supabase.table("meal_plans").select("*, recipes(*)").eq("user", st.session_state.user.id).eq("week", week_start_str).execute()
