@@ -25,10 +25,14 @@ if refresh_token and access_token and "user" not in st.session_state:
     try:
         user = supabase.auth.get_user(access_token)
     except Exception as e:
-        new_session = supabase.auth.refresh_session(refresh_token).session
-        controller.set("access_token", new_session.access_token)
-        controller.set("refresh_token", new_session.refresh_token)
-        time.sleep(1)
+        try:
+            new_session = supabase.auth.refresh_session(refresh_token).session
+            controller.set("access_token", new_session.access_token)
+            controller.set("refresh_token", new_session.refresh_token)
+            time.sleep(1)
+        except Exception as e:
+            controller.set("refresh_token", "", expires=datetime.now() + timedelta(days=-1))
+            time.sleep(1)
     if user:
         st.session_state.user = user.user
 
