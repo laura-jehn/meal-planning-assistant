@@ -1,53 +1,17 @@
 import streamlit as st
-from datetime import datetime, date, timedelta
+from datetime import date, timedelta
 import pandas as pd
-from streamlit_cookies_controller import CookieController
-import time
-from supabase import create_client
+from utils import *
 
 st.set_page_config(page_title="Meal Planner", layout="centered")
 st.title("📅 Meal Planner")
 
-def init_connection():
-    url = st.secrets["SUPABASE_URL"]
-    key = st.secrets["SUPABASE_KEY"]
-    return create_client(url, key)
-
-supabase = init_connection()
-
-controller = CookieController(key='cookies')
-access_token = controller.get("access_token")
-refresh_token = controller.get("refresh_token")
-if refresh_token and access_token and "user" not in st.session_state:
-    try:
-        user = supabase.auth.get_user(access_token)
-    except Exception as e:
-        try:
-            new_session = supabase.auth.refresh_session(refresh_token).session
-            controller.set("access_token", new_session.access_token)
-            controller.set("refresh_token", new_session.refresh_token)
-            time.sleep(1)
-        except Exception as e:
-            controller.set("refresh_token", "", expires=datetime.now() + timedelta(days=-1))
-            time.sleep(1)
-    if user:
-        st.session_state.user = user.user
-
-if "user" in st.session_state:
-    st.sidebar.write(f"👋 Logged in as: {st.session_state.user.email}")
-    if st.sidebar.button("Logout"):
-        st.session_state.clear()
-        expires_at = datetime.now() + timedelta(days=-7)
-        controller.set("access_token", "", expires=expires_at)
-        controller.set("refresh_token", "", expires=expires_at)
-        time.sleep(1)
-        st.rerun()
+supabase, controller = authenticate()
+show_login(controller)
 
 if "user" not in st.session_state:
-    st.warning("Please log in to access the meal planner.")
-    st.stop()
-
-################################################# 
+            st.warning("Please log in to access the meal planner.")
+            st.stop()
 
 def get_start_of_week(d: date):
     return d - timedelta(days=d.weekday())
@@ -58,13 +22,6 @@ week_start = get_start_of_week(selected_date)
 week_start_str = week_start.strftime("%Y-%m-%d")
 
 st.markdown(f"### Plan 5 recipes for the week starting **{week_start_str}**")
-
-# def fetch_recipes():
-#     response = supabase.table("recipes").select("*").eq("author", st.session_state.user.id).execute()
-#     if not response:
-#         st.error(f"Error fetching recipes.")
-#         return []
-#     return response.data
 
 def fetch_recipes():
     user_recipes = supabase.table("recipes").select("*").eq("author", st.session_state.user.id).execute()

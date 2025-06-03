@@ -1,41 +1,15 @@
 import streamlit as st
-from supabase import create_client
 import time
 from datetime import datetime, timedelta
-from streamlit_cookies_controller import CookieController
+from utils import *
 
 st.set_page_config(page_title="Meal Prep Planner", layout="centered", initial_sidebar_state="expanded")
 st.title("🥗 Meal Planning Assistant")
 
-def init_connection():
-    url = st.secrets["SUPABASE_URL"]
-    key = st.secrets["SUPABASE_KEY"]
-    return create_client(url, key)
-
-supabase = init_connection()
-
-controller = CookieController(key='cookies')
-access_token = controller.get("access_token")
-refresh_token = controller.get("refresh_token")
-if refresh_token and access_token and "user" not in st.session_state:
-    try:
-        user = supabase.auth.get_user(access_token)
-    except Exception as e:
-        try:
-            new_session = supabase.auth.refresh_session(refresh_token).session
-            controller.set("access_token", new_session.access_token)
-            controller.set("refresh_token", new_session.refresh_token)
-            time.sleep(1)
-        except Exception as e:
-            controller.set("refresh_token", "", expires=datetime.now() + timedelta(days=-1))
-            time.sleep(1)
-    if user:
-        st.session_state.user = user.user
-
-#################################################
+supabase, controller = authenticate()
 
 st.markdown(f"""
-Are you also fed up with constantly figuring out what to eat every day, only to realize your partner isn't in the mood for it, or worse — you’re missing half the ingredients?
+Are you also fed up with constantly figuring out what to eat every day, only to realize your partner isn't in the mood for it, or worse — you're missing half the ingredients?
 
 I definitely am. And with full-time work starting soon, who even has time to plan, shop, and cook every day?
 
@@ -87,7 +61,10 @@ def show_login():
                 st.error("Signup failed. Maybe account already exists?")
 
 
-if "user" in st.session_state:
+if "user" not in st.session_state:
+    show_login()
+    st.stop()
+else:
     st.sidebar.write(f"👋 Logged in as: {st.session_state.user.email}")
     if st.sidebar.button("Logout"):
         st.session_state.clear()
@@ -96,6 +73,30 @@ if "user" in st.session_state:
         controller.set("refresh_token", "", expires=expires_at)
         time.sleep(1)
         st.rerun()
-else:
-    show_login()
-    st.stop()
+
+    st.subheader("🔗 Link to a Partner")
+
+    partner_email = st.text_input("Enter your partner's email")
+
+    if st.button("Link Partner"):
+        # Get partner user ID
+        result = supabase.table("users").select("id").eq("email", partner_email).execute()
+        if result.data:
+            partner_id = result.data[0]["id"]
+            user_id = st.session_state.user.id
+            if partner_id == user_id:
+                st.warning("You cannot link yourself.")
+            else:
+                # Check if already linked
+                existing = supabase.table("partners").select("*").or_(
+                    f"partnerA.eq.{user_id},partnerB.eq.{partner_id}"
+                ).execute()
+                if existing.data:
+                    st.info("Already linked.")
+                else:
+                    supabase.table("partners").insert([
+                        {"partnerA": user_id, "partnerB": partner_id}
+                    ]).execute()
+                    st.success("Partners linked!")
+        else:
+            st.error("No user found with that email.")
