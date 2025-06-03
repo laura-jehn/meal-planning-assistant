@@ -52,6 +52,7 @@ if "user" not in st.session_state:
 # Form for URL input
 with st.form("recipe_form"):
     url = st.text_input("Paste the recipe URL here:")
+    public = st.checkbox("Make recipe publicly available")
     submit = st.form_submit_button("Add recipe from URL")
 
 if submit:
@@ -67,7 +68,8 @@ if submit:
             "name": name,
             "ingredients": ingredients,
             "instructions": instructions,
-            "author": st.session_state.user.id
+            "author": st.session_state.user.id,
+            "public": public
         }
 
         response = supabase.table("recipes").insert(new_recipe).execute()
@@ -83,22 +85,31 @@ if submit:
     except Exception as e:
         st.error(f"Failed to scrape recipe: {e}")
 
-def fetch_recipes():
-    def merge_recipes(user_recipes, public_recipes):
-        merged = {recipe["id"]: recipe for recipe in user_recipes}
-        for recipe in public_recipes:
-            if recipe["id"] not in merged:
-                merged[recipe["id"]] = recipe
-        return list(merged.values())
-    user_recipes = supabase.table("recipes").select("*").eq("author", st.session_state.user.id).execute()
-    public_recipes = supabase.table("recipes").select("*").eq("public", True).execute()
-    if not user_recipes:
-        st.error(f"Error fetching recipes: {user_recipes.error.message}")
+def fetch_my_recipes():
+    # def merge_recipes(user_recipes, public_recipes):
+    #     merged = {recipe["id"]: recipe for recipe in user_recipes}
+    #     for recipe in public_recipes:
+    #         if recipe["id"] not in merged:
+    #             merged[recipe["id"]] = recipe
+    #     return list(merged.values())
+    try:
+        user_recipes = supabase.table("recipes").select("*").eq("author", st.session_state.user.id).execute()
+    except Exception as e:
+        st.error(f"Error fetching user recipes: {e}")
         return []
-    return merge_recipes(user_recipes.data, public_recipes.data)
+    return user_recipes.data
 
-# Fetch recipes and initialize session state
-recipes = fetch_recipes()
+def fetch_public_recipes():
+    try:
+        public_recipes = supabase.table("recipes").select("*").eq("public", True).neq("author", st.session_state.user.id).execute()
+    except Exception as e:
+        st.error(f"Error fetching user recipes: {e}")
+        return []
+    return public_recipes.data
+
+
+recipes = fetch_my_recipes()
+public_recipes = fetch_public_recipes()
 
 # --- CATEGORY OPTIONS (with empty option for optionality) ---
 TYPES = [""] + ["salad", "soup", "wraps/burrito", "bowl (graupe)", "veggie+base+protein", "potato+schnitzel+veggie"]
@@ -120,6 +131,7 @@ with st.form("create_recipe"):
     toppings = st.multiselect("Toppings (optional)", TOPPINGS, key="toppings")
     notes = st.text_area("Additional Ingredients", key="notes")
     instructions = st.text_area("Instructions", key="instructions")
+    public = st.checkbox("Make recipe publicly available")
 
     submitted = st.form_submit_button("➕ Add Recipe")
 
@@ -145,7 +157,8 @@ with st.form("create_recipe"):
                 "name": st.session_state.name.strip(),
                 "ingredients": ingredients,
                 "instructions": st.session_state.instructions or None,
-                "author": st.session_state.user.id
+                "author": st.session_state.user.id,
+                "public": public
             }
 
             response = supabase.table("recipes").insert(new_recipe).execute()
@@ -170,9 +183,6 @@ if edit_index is not None:
         save = col1.form_submit_button("💾 Save Changes")
         cancel = col2.form_submit_button("❌ Cancel")
 
-        print(recipe)
-        print(instructions)
-
         if save:
             updated = {
                 "name": name.strip(),
@@ -180,11 +190,11 @@ if edit_index is not None:
                 "instructions": instructions or None,
             }
 
-            response = supabase.table("recipes").update(updated).eq("id", recipe["id"]).execute()
+            try:
+                response = supabase.table("recipes").update(updated).eq("id", recipe["id"]).execute()
+            except Exception as e:
+                st.error(f"Error updating recipe: {e}")
 
-            print(response)
-            if not response:
-                st.error(f"Error updating recipe: {response.error.message}")
             st.session_state.edit_index = None
             st.success("Recipe updated!")
             st.rerun()
@@ -195,7 +205,7 @@ if edit_index is not None:
             st.rerun()
 
 # --- DISPLAY EXISTING RECIPES ---
-st.subheader("📖 Saved Recipes")
+st.subheader("📖 My Recipes")
 
 if recipes:
     for i, recipe in enumerate(recipes):
@@ -216,4 +226,26 @@ if recipes:
                     st.success("Deleted.")
                     st.rerun()
 else:
-    st.info("No recipes yet. Create one above!")
+    st.info("No recipes yet. Create one above or add one from below!")
+
+st.subheader("🌍 Public Recipes")
+
+if public_recipes:
+    for i, recipe in enumerate(public_recipes):
+        with st.expander(f"{i+1}. **{recipe['name']}**"):
+            st.write(f"**Ingredients:** {', '.join(recipe['ingredients'])}")
+            st.info(f"**Instructions:** {recipe['instructions']}")
+
+            if st.button("💾 Save to My Recipes", key=f"save_public_{i}"):
+                try:
+                    new_recipe = {
+                        "name": recipe["name"],
+                        "ingredients": recipe["ingredients"],
+                        "instructions": recipe["instructions"],
+                        "author": st.session_state.user.id
+                    }
+                    response = supabase.table("recipes").insert(new_recipe).execute()
+                    st.success(f"Recipe '{recipe['name']}' saved to your recipes!")
+                    st.rerun()
+                except Exception as e:
+                    st.error(f"Error saving recipe: {e}")
